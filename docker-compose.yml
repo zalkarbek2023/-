@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  ocr-comparison:
+    build: .
+    container_name: ocr-comparison-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./static:/app/static
+    environment:
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - MAX_FILE_SIZE=10485760
+      - UPLOAD_DIR=/app/uploads
+      - ENABLE_PADDLE=true
+      - ENABLE_MARKER=true
+      - ENABLE_MINERU=true
+      - ENABLE_OLM=false
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

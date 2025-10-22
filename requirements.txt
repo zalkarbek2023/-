@@ -1,0 +1,21 @@
+# FastAPI и основные зависимости
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+aiofiles>=23.2.1
+python-dotenv>=1.0.0
+httpx>=0.25.0  # Для OLMoCR API клиента
+
+# Базовые OCR зависимости
+paddlepaddle==3.0.0
+paddleocr>=2.7.0
+pdf2image>=1.16.3
+Pillow>=10.1.0
+python-Levenshtein>=0.23.0
+
+# Опциональные OCR библиотеки (устанавливать вручную)
+# marker-pdf>=0.2.0  # ~2GB
+# magic-pdf[full]>=0.7.0  # ~1GB
+# olmocr[gpu]>=0.4.0  # требует GPU 15GB+

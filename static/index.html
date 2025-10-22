@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Comparison Service</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .upload-section {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            transition: all 0.3s;
+        }
+        
+        .upload-section:hover {
+            border-color: #764ba2;
+            background: #f8f9ff;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 40px;
+            font-size: 1.1em;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .upload-btn:hover {
+            transform: scale(1.05);
+        }
+        
+        .upload-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .file-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .process-btn {
+            background: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-top: 15px;
+            display: none;
+        }
+        
+        .status-section {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            display: none;
+        }
+        
+        .status-text {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        
+        .results-section {
+            display: none;
+        }
+        
+        .provider-card {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+        
+        .provider-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+        }
+        
+        .provider-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .stat {
+            display: inline-block;
+            margin-right: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        .stat-value {
+            font-weight: bold;
+            font-size: 1.1em;
+            color: #333;
+        }
+        
+        .view-html-btn {
+            background: #FF9800;
+            color: white;
+            padding: 10px 25px;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 OCR Comparison</h1>
+            <p>Сравнение 4 OCR моделей с визуализацией расхождений</p>
+        </header>
+        
+        <div class="content">
+            <!-- Секция загрузки -->
+            <div class="upload-section" id="uploadSection">
+                <h2>📄 Загрузите документ</h2>
+                <p style="color: #666; margin: 15px 0;">PDF, PNG, JPG, JPEG, TIFF (макс. 10MB)</p>
+                <input type="file" id="fileInput" class="file-input" accept=".pdf,.png,.jpg,.jpeg,.tiff">
+                <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                    Выбрать файл
+                </button>
+                <div class="file-info" id="fileInfo">
+                    <strong>Выбранный файл:</strong> <span id="fileName"></span>
+                </div>
+                <button class="process-btn" id="processBtn" onclick="uploadAndProcess()">
+                    Начать обработку
+                </button>
+            </div>
+            
+            <!-- Секция статуса -->
+            <div class="status-section" id="statusSection">
+                <div class="status-text" id="statusText">Обработка...</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill">0%</div>
+                </div>
+            </div>
+            
+            <!-- Секция результатов -->
+            <div class="results-section" id="resultsSection">
+                <h2 style="margin-bottom: 20px;">📊 Результаты сравнения</h2>
+                <div id="providersResults"></div>
+                <button class="view-html-btn" id="viewHtmlBtn">
+                    Открыть HTML визуализацию
+                </button>
+            </div>
+            
+            <!-- Ошибки -->
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+    </div>
+    
+    <script>
+        let currentTaskId = null;
+        let statusCheckInterval = null;
+        
+        // Обработчик выбора файла
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileInfo').style.display = 'block';
+                document.getElementById('processBtn').style.display = 'inline-block';
+            }
+        });
+        
+        // Загрузка и обработка файла
+        async function uploadAndProcess() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showError('Пожалуйста, выберите файл');
+                return;
+            }
+            
+            // Скрываем секцию загрузки
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('statusSection').style.display = 'block';
+            document.getElementById('resultsSection').style.display = 'none';
+            
+            try {
+                // Шаг 1: Загрузка файла
+                updateStatus('Загрузка файла...', 10);
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const uploadResponse = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!uploadResponse.ok) {
+                    throw new Error('Ошибка загрузки файла');
+                }
+                
+                const uploadData = await uploadResponse.json();
+                currentTaskId = uploadData.task_id;
+                
+                // Шаг 2: Запуск обработки
+                updateStatus('Запуск OCR моделей...', 20);
+                
+                const processResponse = await fetch(`/api/process/${currentTaskId}`, {
+                    method: 'POST'
+                });
+                
+                if (!processResponse.ok) {
+                    throw new Error('Ошибка запуска обработки');
+                }
+                
+                // Шаг 3: Мониторинг статуса
+                checkStatus();
+                
+            } catch (error) {
+                showError('Ошибка: ' + error.message);
+                resetUI();
+            }
+        }
+        
+        // Проверка статуса обработки
+        async function checkStatus() {
+            if (!currentTaskId) return;
+            
+            try {
+                const response = await fetch(`/api/status/${currentTaskId}`);
+                const data = await response.json();
+                
+                updateStatus(
+                    data.status === 'processing' ? 'Обработка документа...' : 'Завершение...',
+                    data.progress
+                );
+                
+                if (data.status === 'completed') {
+                    // Получаем результаты
+                    await getResults();
+                } else if (data.status === 'failed') {
+                    showError('Обработка завершилась с ошибкой');
+                    resetUI();
+                } else {
+                    // Продолжаем проверку
+                    setTimeout(checkStatus, 2000);
+                }
+                
+            } catch (error) {
+                showError('Ошибка проверки статуса: ' + error.message);
+                resetUI();
+            }
+        }
+        
+        // Получение результатов
+        async function getResults() {
+            try {
+                const response = await fetch(`/api/results/${currentTaskId}`);
+                const data = await response.json();
+                
+                displayResults(data);
+                
+            } catch (error) {
+                showError('Ошибка получения результатов: ' + error.message);
+                resetUI();
+            }
+        }
+        
+        // Отображение результатов
+        function displayResults(data) {
+            document.getElementById('statusSection').style.display = 'none';
+            document.getElementById('resultsSection').style.display = 'block';
+            
+            const container = document.getElementById('providersResults');
+            container.innerHTML = '';
+            
+            data.statistics.forEach(stat => {
+                const card = document.createElement('div');
+                card.className = 'provider-card';
+                card.innerHTML = `
+                    <div class="provider-name">${stat.provider_name}</div>
+                    <div class="stat">
+                        <div class="stat-label">Символов</div>
+                        <div class="stat-value">${stat.total_chars}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Различий</div>
+                        <div class="stat-value">${stat.differences}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Точность</div>
+                        <div class="stat-value">${stat.accuracy.toFixed(2)}%</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Время</div>
+                        <div class="stat-value">${stat.processing_time.toFixed(2)}с</div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+            
+            // Кнопка просмотра HTML
+            document.getElementById('viewHtmlBtn').onclick = () => {
+                window.open(`/api/compare/${currentTaskId}/html`, '_blank');
+            };
+        }
+        
+        // Обновление статуса
+        function updateStatus(text, progress) {
+            document.getElementById('statusText').textContent = text;
+            document.getElementById('progressFill').style.width = progress + '%';
+            document.getElementById('progressFill').textContent = progress + '%';
+        }
+        
+        // Показать ошибку
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Сброс UI
+        function resetUI() {
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('statusSection').style.display = 'none';
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('fileInput').value = '';
+            document.getElementById('fileInfo').style.display = 'none';
+            document.getElementById('processBtn').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
