@@ -250,32 +250,41 @@ class TextAlignmentService:
         if not raw_results:
             return []
         
-        # Находим консенсусный текст
+        # Находим консенсусный текст (самый длинный)
         reference = cls.find_consensus_text(raw_results)
         
-        # Создаем объединенные сегменты
-        merged_segments = cls.merge_multiple_alignments(reference, raw_results)
-        
-        # Создаем результаты для каждого провайдера
+        # Создаем результаты для каждого провайдера ОТДЕЛЬНО
         comparison_results = []
         
         for result in raw_results:
-            total_chars = len(result.text)
+            # ВАЖНО: создаем УНИКАЛЬНЫЕ segments для каждого провайдера
+            provider_segments = cls.align_texts(
+                reference=reference,
+                comparison=result.text,
+                provider_name=result.provider_name
+            )
             
-            # Вычисляем метрики
+            # Вычисляем метрики на основе СОБСТВЕННЫХ сегментов провайдера
+            total_chars = len(result.text)
             match_count, diff_count, accuracy = cls.calculate_accuracy(
-                merged_segments,
-                total_chars
+                provider_segments,
+                len(reference)  # Используем длину референса для корректного расчета
             )
             
             comparison_results.append(ComparisonResult(
                 provider_name=result.provider_name,
-                segments=merged_segments,
-                total_characters=total_chars,
+                segments=provider_segments,  # УНИКАЛЬНЫЕ сегменты
+                total_characters=total_chars,  # РЕАЛЬНОЕ количество символов
                 match_count=match_count,
                 diff_count=diff_count,
                 accuracy_percent=accuracy
             ))
+            
+            logger.debug(
+                f"{result.provider_name}: {total_chars} символов, "
+                f"{match_count} совпадений, {diff_count} различий, "
+                f"{accuracy:.2f}% точность"
+            )
         
         logger.info(f"Создано {len(comparison_results)} результатов сравнения")
         

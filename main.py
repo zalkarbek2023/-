@@ -24,10 +24,8 @@ logger = logging.getLogger(__name__)
 from app.api.routes import router as api_router, set_ocr_service
 from app.services.comparison import OCRComparisonService
 from app.models.paddle_ocr import PaddleOCRProvider
-from app.models.marker_ocr import MarkerOCRProvider
-from app.models.mineru_ocr import MinerUOCRProvider
-from app.models.deepseek_ocr import DeepSeekOCRProvider
-from app.models.olmocr_provider import OLMoCRProvider
+from app.models.marker_ocr import TesseractOCRProvider  # Изменено: Tesseract вместо Marker
+from app.models.mineru_ocr import EasyOCRProvider  # Изменено: EasyOCR вместо MinerU
 
 
 # Глобальный сервис
@@ -59,33 +57,19 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"✗ PaddleOCR не доступен: {e}")
     
-    if os.getenv("ENABLE_MARKER", "true").lower() == "true":
+    if os.getenv("ENABLE_TESSERACT", "true").lower() == "true":
         try:
-            providers.append(MarkerOCRProvider())
-            logger.info("✓ Marker OCR включен")
+            providers.append(TesseractOCRProvider())
+            logger.info("✓ Tesseract OCR включен")
         except Exception as e:
-            logger.warning(f"✗ Marker OCR не доступен: {e}")
+            logger.warning(f"✗ Tesseract OCR не доступен: {e}")
     
-    if os.getenv("ENABLE_MINERU", "true").lower() == "true":
+    if os.getenv("ENABLE_EASYOCR", "true").lower() == "true":
         try:
-            providers.append(MinerUOCRProvider())
-            logger.info("✓ MinerU OCR включен")
+            providers.append(EasyOCRProvider())
+            logger.info("✓ EasyOCR включен")
         except Exception as e:
-            logger.warning(f"✗ MinerU OCR не доступен: {e}")
-    
-    if os.getenv("ENABLE_DEEPSEEK", "false").lower() == "true":
-        try:
-            providers.append(DeepSeekOCRProvider())
-            logger.info("✓ DeepSeek OCR включен")
-        except Exception as e:
-            logger.warning(f"✗ DeepSeek OCR не доступен: {e}")
-    
-    if os.getenv("ENABLE_OLM", "true").lower() == "true":
-        try:
-            providers.append(OLMoCRProvider())
-            logger.info("✓ OLMoCR включен")
-        except Exception as e:
-            logger.warning(f"✗ OLMoCR не доступен: {e}")
+            logger.warning(f"✗ EasyOCR не доступен: {e}")
     
     if not providers:
         logger.error("❌ Ни один OCR провайдер не доступен!")
@@ -125,20 +109,19 @@ app = FastAPI(
     title="OCR Comparison Service",
     description="""
     Сервис для сравнения результатов распознавания текста 
-    с использованием 5 различных OCR-моделей.
+    с использованием 3 различных OCR-моделей.
     
     ## Возможности:
     - Загрузка документов (PDF, изображения)
-    - Обработка через 5 OCR моделей параллельно
+    - Обработка через 3 OCR модели параллельно
     - Посимвольное выравнивание и сравнение
     - HTML визуализация с подсветкой расхождений
     - Детальная статистика по каждой модели
     
     ## OCR Модели:
-    1. **PaddleOCR** - универсальная китайская модель
-    2. **OLMoCR** - AllenAI Vision Language Model (GPU/API)
-    3. **Marker** - быстрая конвертация PDF
-    4. **MinerU** - документы с таблицами
+    1. **PaddleOCR** - универсальная модель от PaddlePaddle
+    2. **Tesseract** - классическая проверенная библиотека (100+ языков)
+    3. **EasyOCR** - современная модель на PyTorch (80+ языков)
     """,
     version="1.0.0",
     lifespan=lifespan

@@ -1,121 +1,147 @@
 """
-MinerU OCR провайдер
+EasyOCR провайдер
 """
 from .base_provider import BaseOCRProvider
 import logging
 from pathlib import Path
+from typing import List
+from PIL import Image
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
-class MinerUOCRProvider(BaseOCRProvider):
+class EasyOCRProvider(BaseOCRProvider):
     """
-    Провайдер для MinerU OCR.
-    Оптимизирован для документов с таблицами и сложной структурой.
+    Провайдер для EasyOCR.
+    Поддерживает 80+ языков, точная детекция текста.
+    Работает на CPU и GPU (при наличии CUDA).
     """
     
     def __init__(self):
-        super().__init__("MinerU")
+        super().__init__("EasyOCR")
+        self.reader = None
+        self.pdf2image = None
     
     async def initialize(self) -> None:
-        """Инициализация MinerU"""
+        """Инициализация EasyOCR"""
         try:
-            # Проверяем доступность magic-pdf CLI
-            import subprocess
-            result = subprocess.run(
-                ['magic-pdf', '--help'],
-                capture_output=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                logger.info(f"{self.provider_name}: CLI готов")
-            else:
-                raise ImportError("magic-pdf CLI не доступен")
+            import easyocr
+            from pdf2image import convert_from_path
             
-        except Exception as e:
-            logger.error(f"{self.provider_name}: MinerU не установлен")
+            self.pdf2image = convert_from_path
+            
+            # Создаем reader для английского и русского языков
+            # gpu=False для работы на CPU (production-ready)
+            self.reader = easyocr.Reader(
+                ['en', 'ru'],
+                gpu=False,  # CPU режим для стабильности
+                verbose=False
+            )
+            
+            logger.info(f"{self.provider_name}: EasyOCR готов (CPU режим)")
+            
+        except ImportError as e:
+            logger.error(f"{self.provider_name}: EasyOCR не установлен")
             raise ImportError(
-                "MinerU не установлен. Установите: pip install magic-pdf[full]"
+                "EasyOCR не установлен. Установите: pip install easyocr"
             ) from e
+        except Exception as e:
+            logger.error(f"{self.provider_name}: Ошибка инициализации: {e}")
+            raise
     
     async def extract_text(self, file_path: str) -> str:
         """
-        Извлекает текст из PDF используя MinerU CLI
+        Извлекает текст из PDF/изображений используя EasyOCR
         
         Args:
-            file_path: Путь к PDF файлу
+            file_path: Путь к файлу
             
         Returns:
-            str: Распознанный текст в Markdown формате
+            str: Распознанный текст
         """
-        import subprocess
-        import tempfile
-        
         path = Path(file_path)
         
-        if path.suffix.lower() != '.pdf':
-            raise ValueError(f"{self.provider_name}: Поддерживает только PDF файлы")
-        
         try:
-            # Создаём временную директорию для результатов
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmpdir_path = Path(tmpdir)
-                
-                # Запускаем magic-pdf CLI
-                cmd = [
-                    'magic-pdf',
-                    '-p', str(path),
-                    '-o', tmpdir,
-                    '-m', 'auto'  # auto выбирает лучший метод (ocr/txt)
-                ]
-                
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=600  # 10 минут таймаут
-                )
-                
-                if result.returncode != 0:
-                    logger.error(f"{self.provider_name}: Ошибка CLI: {result.stderr}")
-                    # Не падаем сразу, пробуем найти результат
-                
-                # MinerU создаёт структуру: tmpdir/filename_without_ext/auto/*.md
-                pdf_name = path.stem
-                
-                # Пробуем разные варианты путей
-                possible_paths = [
-                    tmpdir_path / pdf_name / 'auto',
-                    tmpdir_path / 'auto',
-                    tmpdir_path
-                ]
-                
-                md_files = []
-                for search_path in possible_paths:
-                    if search_path.exists():
-                        md_files = list(search_path.glob('**/*.md'))
-                        if md_files:
-                            logger.info(f"{self.provider_name}: Найдено {len(md_files)} файлов в {search_path}")
-                            break
-                if not md_files:
-                    # Логируем структуру директории для отладки
-                    logger.warning(f"{self.provider_name}: Markdown файл не найден")
-                    logger.info(f"{self.provider_name}: Содержимое {tmpdir}:")
-                    for item in tmpdir_path.rglob('*'):
-                        logger.info(f"  {item.relative_to(tmpdir_path)}")
-                    logger.info(f"{self.provider_name}: stdout: {result.stdout[-500:]}")
-                    logger.info(f"{self.provider_name}: stderr: {result.stderr[-500:]}")
-                    return ""
-                
-                # Читаем первый найденный файл
-                full_text = md_files[0].read_text()
-                
-                if not full_text.strip():
-                    logger.warning(f"{self.provider_name}: Пустой результат для {file_path}")
-                    return ""
-                
-                return full_text.strip()
+            if path.suffix.lower() == '.pdf':
+                return await self._extract_from_pdf(path)
+            elif path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+                return await self._extract_from_image(path)
+            else:
+                raise ValueError(f"{self.provider_name}: Неподдерживаемый формат: {path.suffix}")
             
         except Exception as e:
-            logger.error(f"{self.provider_name}: Ошибка обработки: {e}")
+            logger.error(f"{self.provider_name}: Ошибка обработки {file_path}: {e}")
+            raise
+    
+    async def _extract_from_pdf(self, pdf_path: Path) -> str:
+        """Извлекает текст из PDF конвертируя в изображения"""
+        try:
+            # Конвертируем PDF в изображения (250 DPI)
+            images = self.pdf2image(
+                str(pdf_path),
+                dpi=250,
+                fmt='png'
+            )
+            
+            logger.info(f"{self.provider_name}: Конвертировано {len(images)} страниц")
+            
+            # OCR для каждой страницы
+            texts = []
+            for page_num, image in enumerate(images, 1):
+                # Конвертируем PIL Image в numpy array
+                img_array = np.array(image)
+                
+                # EasyOCR возвращает список: [[bbox, text, confidence], ...]
+                results = self.reader.readtext(img_array)
+                
+                # Извлекаем только текст, сортируя по позиции (top-to-bottom, left-to-right)
+                page_texts = []
+                for detection in results:
+                    bbox, text, confidence = detection
+                    if confidence > 0.3:  # Фильтруем низкую уверенность
+                        page_texts.append(text)
+                
+                if page_texts:
+                    page_text = ' '.join(page_texts)
+                    texts.append(page_text)
+                    logger.debug(f"{self.provider_name}: Страница {page_num}: {len(page_text)} символов")
+            
+            full_text = '\n\n'.join(texts)
+            
+            if not full_text.strip():
+                logger.warning(f"{self.provider_name}: Пустой результат для {pdf_path}")
+                return ""
+            
+            logger.info(f"{self.provider_name}: Всего {len(full_text)} символов")
+            return full_text
+            
+        except Exception as e:
+            logger.error(f"{self.provider_name}: Ошибка PDF OCR: {e}")
+            raise
+    
+    async def _extract_from_image(self, image_path: Path) -> str:
+        """Извлекает текст из изображения"""
+        try:
+            # EasyOCR работает напрямую с путями к файлам
+            results = self.reader.readtext(str(image_path))
+            
+            # Извлекаем текст
+            texts = []
+            for detection in results:
+                bbox, text, confidence = detection
+                if confidence > 0.3:
+                    texts.append(text)
+            
+            full_text = ' '.join(texts)
+            
+            if not full_text.strip():
+                logger.warning(f"{self.provider_name}: Пустой результат для {image_path}")
+                return ""
+            
+            logger.info(f"{self.provider_name}: {len(full_text)} символов")
+            return full_text
+            
+        except Exception as e:
+            logger.error(f"{self.provider_name}: Ошибка image OCR: {e}")
             raise

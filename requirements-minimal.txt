@@ -1,4 +1,4 @@
-# Минимальные зависимости для запуска с PaddleOCR
+# Production-ready dependencies для 3 OCR моделей
 
 # FastAPI core
 fastapi>=0.104.1
@@ -17,7 +17,15 @@ Pillow>=10.1.0
 # Текстовые утилиты
 python-Levenshtein>=0.23.0
 
-# PaddleOCR (обязательный минимум)
-# Устанавливать отдельно:
-# pip install paddlepaddle==3.0.0
-# pip install paddleocr
+# OCR библиотеки
+# 1. PaddleOCR - универсальная модель
+paddlepaddle==3.0.0
+paddleocr>=3.3.0
+
+# 2. Tesseract - классическая библиотека
+pytesseract>=0.3.10
+
+# 3. EasyOCR - современная PyTorch модель
+easyocr>=1.7.0
+torch>=2.0.0
+torchvision>=0.15.0

@@ -1,100 +1,131 @@
 """
-Marker OCR провайдер
+Tesseract OCR провайдер
 """
 from .base_provider import BaseOCRProvider
 import logging
 from pathlib import Path
+from typing import List
+from PIL import Image
+import io
 
 logger = logging.getLogger(__name__)
 
 
-class MarkerOCRProvider(BaseOCRProvider):
+class TesseractOCRProvider(BaseOCRProvider):
     """
-    Провайдер для Marker OCR.
-    Оптимизирован для научных статей, PDF с формулами и таблицами.
+    Провайдер для Tesseract OCR.
+    Стабильная, проверенная временем библиотека для OCR.
+    Поддерживает 100+ языков, работает на CPU.
     """
     
     def __init__(self):
-        super().__init__("Marker")
+        super().__init__("Tesseract")
+        self.pytesseract = None
+        self.pdf2image = None
     
     async def initialize(self) -> None:
-        """Инициализация Marker"""
+        """Инициализация Tesseract"""
         try:
-            # Проверяем доступность marker CLI
-            import subprocess
-            result = subprocess.run(
-                ['marker_single', '--help'],
-                capture_output=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                logger.info(f"{self.provider_name}: CLI готов")
-            else:
-                raise ImportError("marker_single CLI не доступен")
+            import pytesseract
+            from pdf2image import convert_from_path
             
-        except Exception as e:
-            logger.error(f"{self.provider_name}: Marker не установлен")
+            self.pytesseract = pytesseract
+            self.pdf2image = convert_from_path
+            
+            # Проверяем доступность tesseract
+            version = pytesseract.get_tesseract_version()
+            logger.info(f"{self.provider_name}: Tesseract v{version} готов")
+            
+        except ImportError as e:
+            logger.error(f"{self.provider_name}: pytesseract не установлен")
             raise ImportError(
-                "Marker не установлен. Установите: pip install marker-pdf"
+                "Tesseract не установлен. Установите: sudo apt-get install tesseract-ocr && pip install pytesseract"
             ) from e
+        except Exception as e:
+            logger.error(f"{self.provider_name}: Ошибка инициализации: {e}")
+            raise
     
     async def extract_text(self, file_path: str) -> str:
         """
-        Извлекает текст из PDF используя Marker CLI
+        Извлекает текст из PDF/изображений используя Tesseract
         
         Args:
-            file_path: Путь к PDF файлу
+            file_path: Путь к файлу
             
         Returns:
-            str: Распознанный текст в Markdown формате
+            str: Распознанный текст
         """
-        import subprocess
-        import tempfile
-        
         path = Path(file_path)
         
-        if path.suffix.lower() != '.pdf':
-            raise ValueError(f"{self.provider_name}: Поддерживает только PDF файлы")
-        
         try:
-            # Создаём временную директорию для результатов
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmpdir_path = Path(tmpdir)
-                
-                # Запускаем marker_single CLI
-                cmd = [
-                    'marker_single',
-                    str(path),
-                    '--output_dir', tmpdir,
-                    '--disable_multiprocessing'
-                ]
-                
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=600  # 10 минут таймаут (первый запуск скачивает модели)
-                )
-                
-                if result.returncode != 0:
-                    logger.error(f"{self.provider_name}: Ошибка CLI: {result.stderr}")
-                    raise RuntimeError(f"marker_single failed: {result.stderr}")
-                
-                # Ищем markdown файл в tmpdir
-                md_files = list(tmpdir_path.glob('*.md'))
-                if not md_files:
-                    logger.warning(f"{self.provider_name}: Файл результата не найден")
-                    return ""
-                
-                # Читаем первый найденный файл
-                full_text = md_files[0].read_text()
-                
-                if not full_text.strip():
-                    logger.warning(f"{self.provider_name}: Пустой результат для {file_path}")
-                    return ""
-                
-                return full_text.strip()
+            if path.suffix.lower() == '.pdf':
+                return await self._extract_from_pdf(path)
+            elif path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+                return await self._extract_from_image(path)
+            else:
+                raise ValueError(f"{self.provider_name}: Неподдерживаемый формат: {path.suffix}")
             
         except Exception as e:
-            logger.error(f"{self.provider_name}: Ошибка обработки: {e}")
+            logger.error(f"{self.provider_name}: Ошибка обработки {file_path}: {e}")
+            raise
+    
+    async def _extract_from_pdf(self, pdf_path: Path) -> str:
+        """Извлекает текст из PDF конвертируя в изображения"""
+        try:
+            # Конвертируем PDF в изображения (250 DPI для качества)
+            images = self.pdf2image(
+                str(pdf_path),
+                dpi=250,
+                fmt='png'
+            )
+            
+            logger.info(f"{self.provider_name}: Конвертировано {len(images)} страниц")
+            
+            # OCR для каждой страницы
+            texts = []
+            for page_num, image in enumerate(images, 1):
+                # Используем multi-language: английский + русский
+                text = self.pytesseract.image_to_string(
+                    image,
+                    lang='eng+rus',
+                    config='--psm 6'  # Assume uniform text block
+                )
+                
+                if text.strip():
+                    texts.append(text.strip())
+                    logger.debug(f"{self.provider_name}: Страница {page_num}: {len(text)} символов")
+            
+            full_text = '\n\n'.join(texts)
+            
+            if not full_text.strip():
+                logger.warning(f"{self.provider_name}: Пустой результат для {pdf_path}")
+                return ""
+            
+            logger.info(f"{self.provider_name}: Всего {len(full_text)} символов")
+            return full_text
+            
+        except Exception as e:
+            logger.error(f"{self.provider_name}: Ошибка PDF OCR: {e}")
+            raise
+    
+    async def _extract_from_image(self, image_path: Path) -> str:
+        """Извлекает текст из изображения"""
+        try:
+            image = Image.open(image_path)
+            
+            text = self.pytesseract.image_to_string(
+                image,
+                lang='eng+rus',
+                config='--psm 6'
+            )
+            
+            if not text.strip():
+                logger.warning(f"{self.provider_name}: Пустой результат для {image_path}")
+                return ""
+            
+            logger.info(f"{self.provider_name}: {len(text)} символов")
+            return text.strip()
+            
+        except Exception as e:
+            logger.error(f"{self.provider_name}: Ошибка image OCR: {e}")
             raise
