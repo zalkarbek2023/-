@@ -84,10 +84,10 @@ class TesseractOCRProvider(BaseOCRProvider):
             # OCR для каждой страницы
             texts = []
             for page_num, image in enumerate(images, 1):
-                # Используем multi-language: английский + русский
+                # Multi-language: английский + русский + китайский упрощенный
                 text = self.pytesseract.image_to_string(
                     image,
-                    lang='eng+rus',
+                    lang='eng+rus+chi_sim',  # Добавлен китайский
                     config='--psm 6'  # Assume uniform text block
                 )
                 
@@ -115,7 +115,7 @@ class TesseractOCRProvider(BaseOCRProvider):
             
             text = self.pytesseract.image_to_string(
                 image,
-                lang='eng+rus',
+                lang='eng+rus+chi_sim',  # Добавлен китайский
                 config='--psm 6'
             )
             

@@ -11,6 +11,8 @@ sudo apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-rus \
     tesseract-ocr-eng \
+    tesseract-ocr-chi-sim \
+    tesseract-ocr-chi-tra \
     poppler-utils \
     python3.12 \
     python3.12-venv \
@@ -18,6 +20,7 @@ sudo apt-get install -y \
 
 # Проверка установки
 tesseract --version  # Должно быть 4.x или 5.x
+tesseract --list-langs  # Должно показать: eng, rus, chi_sim, chi_tra
 ```
 
 ### 2. Python окружение

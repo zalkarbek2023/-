@@ -31,15 +31,21 @@ class EasyOCRProvider(BaseOCRProvider):
             
             self.pdf2image = convert_from_path
             
-            # Создаем reader для английского и русского языков
-            # gpu=False для работы на CPU (production-ready)
-            self.reader = easyocr.Reader(
-                ['en', 'ru'],
-                gpu=False,  # CPU режим для стабильности
+            # EasyOCR требует особых комбинаций языков
+            # Китайский упрощенный совместим только с английским
+            # Для многоязычного OCR используем 2 reader'а
+            self.reader_ch = easyocr.Reader(
+                ['ch_sim', 'en'],  # Китайский + английский
+                gpu=False,
+                verbose=False
+            )
+            self.reader_ru = easyocr.Reader(
+                ['ru', 'en'],  # Русский + английский
+                gpu=False,
                 verbose=False
             )
             
-            logger.info(f"{self.provider_name}: EasyOCR готов (CPU режим)")
+            logger.info(f"{self.provider_name}: EasyOCR готов (ch+en+ru dual-reader, CPU)")
             
         except ImportError as e:
             logger.error(f"{self.provider_name}: EasyOCR не установлен")
@@ -92,18 +98,29 @@ class EasyOCRProvider(BaseOCRProvider):
                 # Конвертируем PIL Image в numpy array
                 img_array = np.array(image)
                 
-                # EasyOCR возвращает список: [[bbox, text, confidence], ...]
-                results = self.reader.readtext(img_array)
+                # Используем оба reader'а для максимального покрытия языков
+                # 1. Китайский + английский
+                results_ch = self.reader_ch.readtext(img_array)
+                # 2. Русский + английский
+                results_ru = self.reader_ru.readtext(img_array)
                 
-                # Извлекаем только текст, сортируя по позиции (top-to-bottom, left-to-right)
-                page_texts = []
-                for detection in results:
+                # Объединяем результаты (удаляем дубликаты английского)
+                all_texts = []
+                
+                # Добавляем китайский + английский
+                for detection in results_ch:
                     bbox, text, confidence = detection
-                    if confidence > 0.3:  # Фильтруем низкую уверенность
-                        page_texts.append(text)
+                    if confidence > 0.3:
+                        all_texts.append(text)
                 
-                if page_texts:
-                    page_text = ' '.join(page_texts)
+                # Добавляем только русский (английский уже есть)
+                for detection in results_ru:
+                    bbox, text, confidence = detection
+                    if confidence > 0.3 and not text.isascii():  # Только не-ASCII (русский)
+                        all_texts.append(text)
+                
+                if all_texts:
+                    page_text = ' '.join(all_texts)
                     texts.append(page_text)
                     logger.debug(f"{self.provider_name}: Страница {page_num}: {len(page_text)} символов")
             
@@ -123,17 +140,24 @@ class EasyOCRProvider(BaseOCRProvider):
     async def _extract_from_image(self, image_path: Path) -> str:
         """Извлекает текст из изображения"""
         try:
-            # EasyOCR работает напрямую с путями к файлам
-            results = self.reader.readtext(str(image_path))
+            # Используем оба reader'а
+            results_ch = self.reader_ch.readtext(str(image_path))
+            results_ru = self.reader_ru.readtext(str(image_path))
             
-            # Извлекаем текст
-            texts = []
-            for detection in results:
+            # Объединяем результаты
+            all_texts = []
+            
+            for detection in results_ch:
                 bbox, text, confidence = detection
                 if confidence > 0.3:
-                    texts.append(text)
+                    all_texts.append(text)
             
-            full_text = ' '.join(texts)
+            for detection in results_ru:
+                bbox, text, confidence = detection
+                if confidence > 0.3 and not text.isascii():
+                    all_texts.append(text)
+            
+            full_text = ' '.join(all_texts)
             
             if not full_text.strip():
                 logger.warning(f"{self.provider_name}: Пустой результат для {image_path}")

@@ -25,9 +25,10 @@ class PaddleOCRProvider(BaseOCRProvider):
             
             # PaddleOCR 3.0+ автоматически определяет GPU
             # use_gpu больше не используется как параметр
+            # lang='ch' поддерживает: китайский + английский + цифры
             self.ocr = PaddleOCR(
                 use_angle_cls=True,  # Определение угла поворота
-                lang='en'  # Можно добавить 'ch', 'ru' и другие
+                lang='ch'  # Китайский + английский (multi-language)
             )
             
             logger.info(f"{self.provider_name}: Модель успешно инициализирована")
