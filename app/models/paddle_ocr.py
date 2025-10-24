@@ -1,5 +1,6 @@
 """
-PaddleOCR провайдер для распознавания текста
+PP-Structure провайдер для структурного анализа документов
+Использует TableRecognitionPipelineV2 для обхода проблем с fused_rms_norm_ext
 """
 from .base_provider import BaseOCRProvider
 import logging
@@ -10,126 +11,139 @@ logger = logging.getLogger(__name__)
 
 class PaddleOCRProvider(BaseOCRProvider):
     """
-    Провайдер для PaddleOCR/PP-Structure.
-    Поддерживает распознавание текста из документов с сохранением структуры.
+    Провайдер для PP-Structure (структурный анализ документов).
+    Использует TableRecognitionPipelineV2 для layout analysis и распознавания таблиц.
+    Поддерживает китайский, английский и русский текст.
+    Выход: Markdown с сохранением структуры документа.
     """
     
     def __init__(self):
-        super().__init__("PaddleOCR")
-        self.ocr = None
+        super().__init__("PP-Structure")
+        self.pipeline = None
     
     async def initialize(self) -> None:
-        """Инициализация PaddleOCR модели"""
+        """Инициализация PP-Structure через TableRecognitionPipelineV2"""
         try:
-            from paddleocr import PaddleOCR
-            
-            # PaddleOCR 3.0+ автоматически определяет GPU
-            # use_gpu больше не используется как параметр
-            # lang='ch' поддерживает: китайский + английский + цифры
-            self.ocr = PaddleOCR(
-                use_angle_cls=True,  # Определение угла поворота
-                lang='ch'  # Китайский + английский (multi-language)
+            from paddleocr import TableRecognitionPipelineV2
+        except ImportError as e:
+            logger.error(f"{self.provider_name}: TableRecognitionPipelineV2 не установлен")
+            raise ImportError(
+                'PP-Structure не установлен. Установите: pip install "paddleocr[doc-parser]"'
+            ) from e
+
+        try:
+            # Используем TableRecognitionPipelineV2 - стабильная альтернатива PPStructureV3
+            # Включает layout detection + OCR + table recognition
+            self.pipeline = TableRecognitionPipelineV2(
+                use_layout_detection=True,  # Анализ структуры документа
+                use_ocr_model=True,         # OCR для распознавания текста
             )
             
-            logger.info(f"{self.provider_name}: Модель успешно инициализирована")
-            
-        except ImportError as e:
-            logger.error(f"{self.provider_name}: Не установлена библиотека PaddleOCR")
-            raise ImportError(
-                "PaddleOCR не установлен. Установите: pip install paddleocr paddlepaddle"
-            ) from e
+            logger.info(f"{self.provider_name}: PP-Structure инициализирована (TableRecognitionPipelineV2)")
         except Exception as e:
-            logger.error(f"{self.provider_name}: Ошибка инициализации: {e}")
+            logger.error(f"{self.provider_name}: Ошибка инициализации PP-Structure: {e}")
+            
+            # Даём подсказку если это проблема с версиями
+            if "fused_rms_norm_ext" in str(e):
+                logger.error(
+                    "Обнаружена несовместимость версий. Попробуйте:\n"
+                    "  pip uninstall paddlepaddle paddleocr -y\n"
+                    "  pip install 'paddlepaddle==2.6.1'\n"
+                    "  pip install 'paddleocr==2.7.3'"
+                )
             raise
     
     async def extract_text(self, file_path: str) -> str:
         """
-        Извлекает текст из документа используя PaddleOCR
+        Извлекает текст с сохранением структуры используя PP-Structure
         
         Args:
             file_path: Путь к PDF или изображению
             
         Returns:
-            str: Распознанный текст
+            str: Текст в Markdown формате с сохранением структуры
         """
-        if self.ocr is None:
+        if self.pipeline is None:
             raise RuntimeError(f"{self.provider_name}: Модель не инициализирована")
         
         path = Path(file_path)
-        logger.debug(f"{self.provider_name}: extract_text для {file_path}, suffix: {path.suffix.lower()}")
+        logger.debug(f"{self.provider_name}: Обработка {file_path}")
         
         # Если PDF, конвертируем в изображения
         if path.suffix.lower() == '.pdf':
-            logger.debug(f"{self.provider_name}: Обработка как PDF")
             return await self._process_pdf(file_path)
         else:
-            logger.debug(f"{self.provider_name}: Обработка как изображение")
             return await self._process_image(file_path)
     
     async def _process_image(self, image_path: str) -> str:
-        """Обработка одного изображения"""
-        # PaddleOCR 3.0 не использует параметр cls
-        result = self.ocr.ocr(image_path)
-        
-        logger.debug(f"{self.provider_name}: result type: {type(result)}, len: {len(result) if result else 0}")
-        
-        if not result or not result[0]:
-            logger.warning(f"{self.provider_name}: Пустой результат для {image_path}")
-            return ""
-        
-        text_lines = []
-        
-        # Обработка каждой страницы (PaddleOCR 3.x возвращает OCRResult объекты)
-        for page_result in result:
-            if page_result is None:
-                continue
+        """Обработка одного изображения с TableRecognitionPipelineV2"""
+        try:
+            # TableRecognitionPipelineV2 возвращает список результатов для каждой страницы
+            results = self.pipeline.predict(image_path)
             
-            logger.debug(f"{self.provider_name}: page_result type: {type(page_result)}")
+            if not results or len(results) == 0:
+                logger.warning(f"{self.provider_name}: Пустой результат для {image_path}")
+                return ""
             
-            # Получаем JSON данные из OCRResult
-            data = page_result.json['res']
+            # Берём первый результат (для одного изображения)
+            page_result = results[0]
+            text_parts = []
             
-            # Извлекаем распознанный текст
-            if 'rec_texts' in data:
-                texts = data['rec_texts']
-                logger.debug(f"{self.provider_name}: Найдено {len(texts)} строк текста")
-                text_lines.extend(texts)
-            else:
-                logger.warning(f"{self.provider_name}: rec_texts не найден в data, ключи: {list(data.keys())}")
-        
-        return '\n'.join(text_lines)
+            # 1) Извлекаем общий OCR текст (весь распознанный текст на странице)
+            if 'overall_ocr_res' in page_result:
+                ocr_res = page_result['overall_ocr_res']
+                if 'rec_texts' in ocr_res and ocr_res['rec_texts']:
+                    # Собираем все распознанные строки текста
+                    text_lines = [text for text in ocr_res['rec_texts'] if text.strip()]
+                    if text_lines:
+                        text_parts.append('\n'.join(text_lines))
+            
+            # 2) Извлекаем таблицы (если есть)
+            if 'table_res_list' in page_result and page_result['table_res_list']:
+                for table in page_result['table_res_list']:
+                    # Таблица в HTML формате
+                    if 'pred_html' in table and table['pred_html']:
+                        text_parts.append(f"\n\n[Таблица]\n{table['pred_html']}\n")
+                    
+                    # Текст вокруг таблицы
+                    if 'neighbor_texts' in table and table['neighbor_texts']:
+                        text_parts.append(table['neighbor_texts'])
+            
+            result_text = '\n\n'.join(text_parts)
+            logger.debug(f"{self.provider_name}: Извлечено {len(result_text)} символов")
+            return result_text
+            
+        except Exception as e:
+            logger.error(f"{self.provider_name}: Ошибка обработки изображения: {e}")
+            raise
     
     async def _process_pdf(self, pdf_path: str) -> str:
         """Обработка PDF документа"""
-        logger.debug(f"{self.provider_name}: Начало обработки PDF {pdf_path}")
         try:
             from pdf2image import convert_from_path
             
-            # Конвертируем PDF в изображения (dpi=250 для оптимального качества OCR)
-            # dpi=200 работает, но dpi=250 дает лучшее распознавание мелкого текста
-            # dpi=300 приводит к пустым результатам в PaddleOCR 3.x
-            logger.debug(f"{self.provider_name}: Конвертация PDF в изображения...")
+            # Конвертируем PDF в изображения (dpi=250 оптимально)
             images = convert_from_path(pdf_path, dpi=250)
-            logger.debug(f"{self.provider_name}: Получено {len(images)} страниц")
+            logger.info(f"{self.provider_name}: Конвертировано {len(images)} страниц")
             
             all_text = []
-            for i, image in enumerate(images):
-                logger.debug(f"{self.provider_name}: Обработка страницы {i+1}/{len(images)}")
-                
+            for i, image in enumerate(images, 1):
                 # Сохраняем временно изображение
                 import tempfile
                 with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
                     image.save(tmp.name, 'PNG')
-                    logger.debug(f"{self.provider_name}: Временный файл: {tmp.name}")
                     page_text = await self._process_image(tmp.name)
-                    logger.debug(f"{self.provider_name}: Получено {len(page_text)} символов со страницы {i+1}")
-                    all_text.append(page_text)
+                    
+                    if page_text:
+                        all_text.append(f"## Страница {i}\n\n{page_text}")
+                    
+                    logger.debug(f"{self.provider_name}: Страница {i}: {len(page_text)} символов")
                 
                 # Удаляем временный файл
                 Path(tmp.name).unlink(missing_ok=True)
             
             result = '\n\n'.join(all_text)
-            logger.debug(f"{self.provider_name}: Итого текста: {len(result)} символов")
+            logger.info(f"{self.provider_name}: Всего {len(result)} символов")
             return result
             
         except ImportError:
