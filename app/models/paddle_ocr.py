@@ -1,19 +1,22 @@
 """
 PP-Structure провайдер для структурного анализа документов
 
-ВАЖНО: Используем TableRecognitionPipelineV2 вместо официального PPStructureV3
-из-за бага с fused_rms_norm_ext в CPU-версии PaddlePaddle 3.0.0.
+Режимы работы:
+- GPU: официальный PPStructureV3 (формулы, графики, layout, таблицы, OCR)
+- CPU: безопасный fallback на TableRecognitionPipelineV2 (layout, таблицы, OCR)
 
-PPStructureV3 требует GPU-версию или специальную сборку Paddle с поддержкой
-fused операций. TableRecognitionPipelineV2 предоставляет ту же функциональность
-(layout detection, table recognition, OCR) без этой зависимости.
+Требования для GPU режима:
+- Установлен paddlepaddle-gpu==3.0.0 (под вашу версию CUDA)
+- Драйвер NVIDIA и доступный GPU (проверка: nvidia-smi)
 
-Для использования PPStructureV3: установите paddlepaddle-gpu или используйте
-Docker-образ с предустановленным PaddlePaddle GPU.
+Переключатели через переменные окружения:
+- PPOCR_USE_FORMULA=true|false (по умолчанию: true)
+- PPOCR_USE_CHART=true|false (по умолчанию: true)
 """
 from .base_provider import BaseOCRProvider
 import logging
 from pathlib import Path
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +39,34 @@ class PaddleOCRProvider(BaseOCRProvider):
         self.pipeline = None
     
     async def initialize(self) -> None:
-        """Инициализация PP-Structure pipeline"""
+        """Инициализация PP-Structure pipeline (GPU: PPStructureV3, CPU: fallback)"""
         # Проверяем, не загружена ли уже модель
         if self.pipeline is not None:
             logger.debug(f"{self.provider_name}: Модель уже инициализирована, пропускаем загрузку")
             return
-        
+
+        # Переключатели формул/графиков
+        use_formula = os.getenv("PPOCR_USE_FORMULA", "true").lower() == "true"
+        use_chart = os.getenv("PPOCR_USE_CHART", "true").lower() == "true"
+
+        # Пытаемся загрузить официальный PPStructureV3 (GPU)
+        try:
+            from paddleocr import PPStructureV3
+
+            self.pipeline = PPStructureV3(
+                use_doc_orientation_classify=True,
+                use_textline_orientation=True,
+                use_formula_recognition=use_formula,
+                use_chart_recognition=use_chart,
+            )
+            logger.info(f"{self.provider_name}: PPStructureV3 инициализирована (GPU)")
+            return
+        except Exception as e:
+            logger.warning(
+                f"{self.provider_name}: PPStructureV3 недоступна ({e}). Переключаемся на CPU fallback (TableRecognitionPipelineV2)."
+            )
+
+        # CPU fallback: TableRecognitionPipelineV2
         try:
             from paddleocr import TableRecognitionPipelineV2
         except ImportError as e:
@@ -51,14 +76,11 @@ class PaddleOCRProvider(BaseOCRProvider):
             ) from e
 
         try:
-            # TableRecognitionPipelineV2 - стабильная реализация PP-Structure для CPU
-            # Включает layout detection + OCR + table recognition
             self.pipeline = TableRecognitionPipelineV2(
                 use_layout_detection=True,  # Анализ структуры документа
                 use_ocr_model=True,         # OCR для распознавания текста
             )
-            
-            logger.info(f"{self.provider_name}: PP-Structure инициализирована (TableRecognitionPipelineV2)")
+            logger.info(f"{self.provider_name}: PP-Structure инициализирована (CPU fallback: TableRecognitionPipelineV2)")
         except Exception as e:
             logger.error(f"{self.provider_name}: Ошибка инициализации PP-Structure: {e}")
             raise
