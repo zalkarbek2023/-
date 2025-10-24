@@ -37,6 +37,11 @@ class PaddleOCRProvider(BaseOCRProvider):
     
     async def initialize(self) -> None:
         """Инициализация PP-Structure pipeline"""
+        # Проверяем, не загружена ли уже модель
+        if self.pipeline is not None:
+            logger.debug(f"{self.provider_name}: Модель уже инициализирована, пропускаем загрузку")
+            return
+        
         try:
             from paddleocr import TableRecognitionPipelineV2
         except ImportError as e:

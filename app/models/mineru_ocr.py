@@ -20,11 +20,17 @@ class EasyOCRProvider(BaseOCRProvider):
     
     def __init__(self):
         super().__init__("EasyOCR")
-        self.reader = None
+        self.reader_ch = None  # Китайский + английский
+        self.reader_ru = None  # Русский + английский
         self.pdf2image = None
     
     async def initialize(self) -> None:
         """Инициализация EasyOCR"""
+        # Проверяем, не загружены ли уже ридеры
+        if self.reader_ch is not None and self.reader_ru is not None:
+            logger.debug(f"{self.provider_name}: Ридеры уже загружены, пропускаем")
+            return
+        
         try:
             import easyocr
             from pdf2image import convert_from_path

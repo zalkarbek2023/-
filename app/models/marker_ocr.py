@@ -25,6 +25,11 @@ class TesseractOCRProvider(BaseOCRProvider):
     
     async def initialize(self) -> None:
         """Инициализация Tesseract"""
+        # Проверяем, не загружен ли уже
+        if self.pytesseract is not None:
+            logger.debug(f"{self.provider_name}: Уже инициализирован, пропускаем")
+            return
+        
         try:
             import pytesseract
             from pdf2image import convert_from_path
