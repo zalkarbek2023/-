@@ -39,7 +39,7 @@ pip install paddlepaddle==3.0.0 || echo "⚠️  PaddlePaddle (CPU) не уст�
 pip install paddleocr || echo "⚠️  PaddleOCR не установлен"
 
 # Если есть GPU и доступен nvidia-smi, пробуем переключиться на GPU Paddle
-if command -v nvidia-smi &> /dev/null; then
+if command -v nvidia-smi &> /dev/null || [ "${FORCE_PADDLE_GPU,,}" = "true" ]; then
     echo "🧠 Обнаружен GPU (nvidia-smi). Пробуем установить paddlepaddle-gpu..."
     # Проверяем, собран ли Paddle с CUDA
     PY_HAS_CUDA=$(python3 - << 'EOF'

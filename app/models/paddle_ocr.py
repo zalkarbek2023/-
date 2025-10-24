@@ -10,8 +10,8 @@ PP-Structure провайдер для структурного анализа �
 - Драйвер NVIDIA и доступный GPU (проверка: nvidia-smi)
 
 Переключатели через переменные окружения:
-- PPOCR_USE_FORMULA=true|false (по умолчанию: true)
-- PPOCR_USE_CHART=true|false (по умолчанию: true)
+- PPOCR_USE_FORMULA=true|false (по умолчанию: false)
+- PPOCR_USE_CHART=true|false (по умолчанию: false)
 """
 from .base_provider import BaseOCRProvider
 import logging
@@ -45,26 +45,35 @@ class PaddleOCRProvider(BaseOCRProvider):
             logger.debug(f"{self.provider_name}: Модель уже инициализирована, пропускаем загрузку")
             return
 
-        # Переключатели формул/графиков
-        use_formula = os.getenv("PPOCR_USE_FORMULA", "true").lower() == "true"
-        use_chart = os.getenv("PPOCR_USE_CHART", "true").lower() == "true"
+        # Переключатели формул/графиков (по умолчанию выключены, чтобы избежать CPU-ошибок fused_rms_norm_ext)
+        use_formula = os.getenv("PPOCR_USE_FORMULA", "false").lower() == "true"
+        use_chart = os.getenv("PPOCR_USE_CHART", "false").lower() == "true"
 
-        # Пытаемся загрузить официальный PPStructureV3 (GPU)
+        # Пробуем PPStructureV3 ТОЛЬКО если Paddle собран с CUDA
+        use_gpu = False
         try:
-            from paddleocr import PPStructureV3
+            import paddle
+            use_gpu = bool(getattr(paddle, "is_compiled_with_cuda", lambda: False)())
+        except Exception:
+            use_gpu = False
 
-            self.pipeline = PPStructureV3(
-                use_doc_orientation_classify=True,
-                use_textline_orientation=True,
-                use_formula_recognition=use_formula,
-                use_chart_recognition=use_chart,
-            )
-            logger.info(f"{self.provider_name}: PPStructureV3 инициализирована (GPU)")
-            return
-        except Exception as e:
-            logger.warning(
-                f"{self.provider_name}: PPStructureV3 недоступна ({e}). Переключаемся на CPU fallback (TableRecognitionPipelineV2)."
-            )
+        if use_gpu:
+            try:
+                from paddleocr import PPStructureV3
+                self.pipeline = PPStructureV3(
+                    use_doc_orientation_classify=True,
+                    use_textline_orientation=True,
+                    use_formula_recognition=use_formula,
+                    use_chart_recognition=use_chart,
+                )
+                logger.info(f"{self.provider_name}: PPStructureV3 инициализирована (GPU)")
+                return
+            except Exception as e:
+                logger.warning(
+                    f"{self.provider_name}: PPStructureV3 недоступна ({e}). Переключаемся на CPU fallback (TableRecognitionPipelineV2)."
+                )
+        else:
+            logger.info(f"{self.provider_name}: Paddle без CUDA, используем CPU fallback")
 
         # CPU fallback: TableRecognitionPipelineV2
         try:
