@@ -1,6 +1,15 @@
 """
 PP-Structure провайдер для структурного анализа документов
-Использует TableRecognitionPipelineV2 для обхода проблем с fused_rms_norm_ext
+
+ВАЖНО: Используем TableRecognitionPipelineV2 вместо официального PPStructureV3
+из-за бага с fused_rms_norm_ext в CPU-версии PaddlePaddle 3.0.0.
+
+PPStructureV3 требует GPU-версию или специальную сборку Paddle с поддержкой
+fused операций. TableRecognitionPipelineV2 предоставляет ту же функциональность
+(layout detection, table recognition, OCR) без этой зависимости.
+
+Для использования PPStructureV3: установите paddlepaddle-gpu или используйте
+Docker-образ с предустановленным PaddlePaddle GPU.
 """
 from .base_provider import BaseOCRProvider
 import logging
@@ -12,27 +21,32 @@ logger = logging.getLogger(__name__)
 class PaddleOCRProvider(BaseOCRProvider):
     """
     Провайдер для PP-Structure (структурный анализ документов).
-    Использует TableRecognitionPipelineV2 для layout analysis и распознавания таблиц.
-    Поддерживает китайский, английский и русский текст.
-    Выход: Markdown с сохранением структуры документа.
+    
+    Функциональность PP-StructureV3:
+    - Layout detection (анализ структуры документа)
+    - Table recognition (таблицы в HTML)
+    - Multi-language OCR (китайский, английский, русский)
+    - Document orientation correction
+    
+    Реализация: TableRecognitionPipelineV2 (стабильная альтернатива для CPU)
     """
     
     def __init__(self):
-        super().__init__("PP-Structure")
+        super().__init__("PP-StructureV3")
         self.pipeline = None
     
     async def initialize(self) -> None:
-        """Инициализация PP-Structure через TableRecognitionPipelineV2"""
+        """Инициализация PP-Structure pipeline"""
         try:
             from paddleocr import TableRecognitionPipelineV2
         except ImportError as e:
             logger.error(f"{self.provider_name}: TableRecognitionPipelineV2 не установлен")
             raise ImportError(
-                'PP-Structure не установлен. Установите: pip install "paddleocr[doc-parser]"'
+                'PP-Structure не установлен. Установите: pip install "paddleocr>=3.3.0"'
             ) from e
 
         try:
-            # Используем TableRecognitionPipelineV2 - стабильная альтернатива PPStructureV3
+            # TableRecognitionPipelineV2 - стабильная реализация PP-Structure для CPU
             # Включает layout detection + OCR + table recognition
             self.pipeline = TableRecognitionPipelineV2(
                 use_layout_detection=True,  # Анализ структуры документа
@@ -42,15 +56,6 @@ class PaddleOCRProvider(BaseOCRProvider):
             logger.info(f"{self.provider_name}: PP-Structure инициализирована (TableRecognitionPipelineV2)")
         except Exception as e:
             logger.error(f"{self.provider_name}: Ошибка инициализации PP-Structure: {e}")
-            
-            # Даём подсказку если это проблема с версиями
-            if "fused_rms_norm_ext" in str(e):
-                logger.error(
-                    "Обнаружена несовместимость версий. Попробуйте:\n"
-                    "  pip uninstall paddlepaddle paddleocr -y\n"
-                    "  pip install 'paddlepaddle==2.6.1'\n"
-                    "  pip install 'paddleocr==2.7.3'"
-                )
             raise
     
     async def extract_text(self, file_path: str) -> str:
@@ -76,9 +81,9 @@ class PaddleOCRProvider(BaseOCRProvider):
             return await self._process_image(file_path)
     
     async def _process_image(self, image_path: str) -> str:
-        """Обработка одного изображения с TableRecognitionPipelineV2"""
+        """Обработка одного изображения с PP-Structure pipeline"""
         try:
-            # TableRecognitionPipelineV2 возвращает список результатов для каждой страницы
+            # TableRecognitionPipelineV2.predict() возвращает список результатов
             results = self.pipeline.predict(image_path)
             
             if not results or len(results) == 0:
