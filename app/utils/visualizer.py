@@ -4,6 +4,7 @@
 from typing import List
 from app.models.schemas import DiffSegment, ComparisonResult
 import html
+import re
 
 
 class HTMLVisualizer:
@@ -77,6 +78,12 @@ class HTMLVisualizer:
             font-size: 12px;
             color: #666;
         }
+        /* Таблицы из PP-Structure */
+        .table-block { margin: 10px 0; overflow-x: auto; }
+        .table-block table { border-collapse: collapse; width: 100%; background: #fff; }
+        .table-block th, .table-block td { border: 1px solid #ddd; padding: 6px 8px; font-family: system-ui, sans-serif; }
+        .table-block thead th { background: #f0f0f0; font-weight: 600; }
+        .table-caption { font-size: 13px; color: #333; margin: 6px 0; font-weight: 600; }
     </style>
     """
     
@@ -167,16 +174,9 @@ class HTMLVisualizer:
         
         for segment in result.segments:
             cls_name = segment.segment_type.replace('_', '-')
-            escaped_text = html.escape(segment.text)
-            
-            # Добавляем tooltip с информацией от разных провайдеров
-            tooltip = cls._generate_tooltip(segment)
-            
-            html_parts.append(
-                f"<span class='segment {cls_name}' title='{tooltip}'>"
-                f"{escaped_text}"
-                f"</span>"
-            )
+
+            # Разбиваем текст на обычные части и HTML-таблицы, чтобы таблицы отрендерить, а текст экранировать
+            html_parts.append(cls._render_segment_with_tables(segment, cls_name))
         
         html_parts.append("</div>")
         
@@ -194,6 +194,71 @@ class HTMLVisualizer:
         html_parts.append("</div>")
         
         return "\n".join(html_parts)
+
+    @classmethod
+    def _sanitize_table_html(cls, table_html: str) -> str:
+        """Минимальная санитизация HTML таблицы: удаляем script/iframe и on* обработчики.
+        Источник HTML — наш пайплайн, но дополнительная защита не повредит.
+        """
+        # Удаляем потенциально опасные теги
+        table_html = re.sub(r"</?(script|iframe|object|embed)[^>]*>", "", table_html, flags=re.IGNORECASE)
+        # Удаляем inline-обработчики событий вроде onclick="..."
+        table_html = re.sub(r"\s+on[a-zA-Z]+\s*=\s*\"[^\"]*\"", "", table_html)
+        table_html = re.sub(r"\s+on[a-zA-Z]+\s*=\s*'[^']*'", "", table_html)
+        # Часто PP-Structure оборачивает <table> внутри <html><body> — убираем оболочку
+        # Оставляем только первый <table>...</table>
+        m = re.search(r"<table[\s\S]*?</table>", table_html, flags=re.IGNORECASE)
+        if m:
+            table_html = m.group(0)
+        return table_html
+
+    @classmethod
+    def _render_segment_with_tables(cls, segment: DiffSegment, cls_name: str) -> str:
+        """Рендер сегмента так, чтобы таблицы отображались, а обычный текст подсвечивался и экранировался."""
+        text = segment.text or ""
+        tooltip = cls._generate_tooltip(segment)
+
+        parts: List[str] = []
+        pattern = re.compile(r"<table[\s\S]*?</table>|<html[\s\S]*?<table[\s\S]*?</table>[\s\S]*?</html>", re.IGNORECASE)
+        last = 0
+        for m in pattern.finditer(text):
+            # Обычный текст до таблицы
+            if m.start() > last:
+                plain = text[last:m.start()]
+                # Заменяем маркер [Таблица] на подпись
+                plain = plain.replace("[Таблица]", "")
+                escaped = html.escape(plain)
+                if escaped:
+                    parts.append(
+                        f"<span class='segment {cls_name}' title='{tooltip}'>" f"{escaped}" f"</span>"
+                    )
+            # Вставляем таблицу (санитизируем и без экранирования)
+            table_html = cls._sanitize_table_html(m.group(0))
+            if table_html:
+                parts.append("<div class='table-caption'>Таблица</div>")
+                parts.append(f"<div class='table-block'>{table_html}</div>")
+            last = m.end()
+
+        # Хвост после последней таблицы
+        if last < len(text):
+            tail = text[last:]
+            tail = tail.replace("[Таблица]", "")
+            escaped_tail = html.escape(tail)
+            if escaped_tail:
+                parts.append(
+                    f"<span class='segment {cls_name}' title='{tooltip}'>" f"{escaped_tail}" f"</span>"
+                )
+
+        # Если таблиц не было вовсе — обычная логика
+        if not parts:
+            escaped_text = html.escape(text)
+            return (
+                f"<span class='segment {cls_name}' title='{tooltip}'>"
+                f"{escaped_text}"
+                f"</span>"
+            )
+
+        return "".join(parts)
     
     @classmethod
     def _generate_tooltip(cls, segment: DiffSegment) -> str:
